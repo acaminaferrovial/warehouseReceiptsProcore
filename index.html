@@ -1,0 +1,567 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Recepción de Materiales | Procore Materials Hub</title>
+  <meta name="description" content="Gestión rápida y sencilla de recepción de materiales, firmas y albaranes integrada con Procore.">
+  <meta name="theme-color" content="#f15a24">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Recepción Procore">
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='%23f15a24'/><text x='50' y='68' font-size='56' font-family='sans-serif' font-weight='900' fill='white' text-anchor='middle'>P</text></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <!-- SheetJS CDN for parsing Excel (.xlsx / .xls) and CSV files directly in browser -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <link rel="manifest" href="manifest.json">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app-layout">
+    <!-- Top Navigation Header -->
+    <header class="app-header">
+      <div class="header-brand">
+        <div class="brand-badge">
+          <span class="procore-icon">P</span>
+        </div>
+        <div class="brand-titles">
+          <span class="brand-subtitle">Procore Materials Hub</span>
+          <h1 class="brand-name">Recepción de Materiales</h1>
+        </div>
+      </div>
+      
+      <div class="header-actions">
+        <div class="project-pill" id="current-project">
+          <span class="status-dot online"></span>
+          <span>Proyecto: <strong>Torre Skyline - Fase 2</strong></span>
+        </div>
+        <button id="btn-procore-status" class="btn-ghost" title="Ver sincronización con Procore API">
+          <span class="cloud-icon">☁️</span>
+          <span class="btn-label">Procore Daily Log: <strong>Conectado</strong></span>
+        </button>
+      </div>
+    </header>
+
+    <!-- Navigation Tabs -->
+    <nav class="main-tabs" role="tablist">
+      <button class="tab-btn active" data-tab="tab-recepcion" id="tab-btn-recepcion">
+        <span class="tab-icon">📦</span>
+        <span class="tab-title">Recepción en Obra</span>
+        <span class="badge" id="count-pendientes">0</span>
+      </button>
+      <button class="tab-btn" data-tab="tab-nuevo" id="tab-btn-nuevo">
+        <span class="tab-icon">➕</span>
+        <span class="tab-title">Cargar Pedidos / Excel</span>
+      </button>
+      <button class="tab-btn" data-tab="tab-historial" id="tab-btn-historial">
+        <span class="tab-icon">📋</span>
+        <span class="tab-title">Historial y Firmas</span>
+        <span class="badge badge-muted" id="count-historial">0</span>
+      </button>
+    </nav>
+
+    <!-- Main Content Area -->
+    <main class="main-content">
+      
+      <!-- TAB 1: RECEPCIÓN EN OBRA -->
+      <section id="tab-recepcion" class="tab-panel active">
+        <!-- Quick Actions & Search Bar -->
+        <div class="panel-toolbar">
+          <div class="search-box">
+            <span class="search-icon">🔍</span>
+            <input type="text" id="input-search-orders" placeholder="Buscar por proveedor, material o Nº pedido..." autocomplete="off">
+            <button id="btn-clear-search" class="btn-icon" style="display: none;">✕</button>
+          </div>
+          
+          <div class="toolbar-actions">
+            <button id="btn-nueva-imprevista" class="btn btn-secondary">
+              <span class="btn-icon">⚡</span>
+              <span>+ Llegada sin Pedido previo</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Filter Chips -->
+        <div class="filter-chips">
+          <button class="chip active" data-filter="all">Todos los pendientes (<span id="chip-count-all">0</span>)</button>
+          <button class="chip" data-filter="prioritario">🔥 Urgentes (<span id="chip-count-urgent">0</span>)</button>
+          <button class="chip" data-filter="parcial">⏳ Con entregas parciales (<span id="chip-count-partial">0</span>)</button>
+        </div>
+
+        <!-- List / Grid of Orders -->
+        <div id="orders-container" class="orders-grid">
+          <!-- Dynamically filled by JS -->
+        </div>
+
+        <!-- Empty state message -->
+        <div id="empty-orders-state" class="empty-state" style="display: none;">
+          <div class="empty-icon">🎉</div>
+          <h3>¡No hay pedidos pendientes de entrega!</h3>
+          <p>Todos los pedidos han sido recibidos o procesados. Puedes cargar más desde la pestaña "Cargar Pedidos / Excel" o registrar una entrega imprevista si acaba de llegar un camión.</p>
+        </div>
+      </section>
+
+      <!-- TAB 2: CARGAR PEDIDOS (MANUAL O EXCEL) -->
+      <section id="tab-nuevo" class="tab-panel">
+        <div class="create-layout">
+          <!-- Left Column: Manual Order Form -->
+          <div class="card form-card">
+            <div class="card-header">
+              <h2>Añadir Pedido Rápido</h2>
+              <p class="card-desc">Para cuando apuntas un pedido que esperas que llegue hoy o en los próximos días.</p>
+            </div>
+            
+            <form id="form-nuevo-pedido" class="order-form">
+              <div class="form-row">
+                <div class="form-group flex-1">
+                  <label for="order-num">Nº Pedido / Ref.</label>
+                  <input type="text" id="order-num" placeholder="Ej: PED-2026-089" required>
+                </div>
+                <div class="form-group flex-2">
+                  <label for="order-supplier">Proveedor / Empresa</label>
+                  <input type="text" id="order-supplier" placeholder="Ej: Cemex, Celsa Steel, Sika..." required>
+                </div>
+              </div>
+
+              <div class="form-group">
+                <label for="order-description">Descripción de Materiales</label>
+                <textarea id="order-description" rows="3" placeholder="Ej: 20 sacos de cemento Portland, 5 palets de ladrillo perforado..." required></textarea>
+              </div>
+
+              <div class="form-row">
+                <div class="form-group flex-1">
+                  <label for="order-quantity">Cantidad Esperada</label>
+                  <input type="text" id="order-quantity" placeholder="Ej: 20 ud, 4 cubas, 500 kg" required>
+                </div>
+                <div class="form-group flex-1">
+                  <label for="order-expected-date">Fecha Estimada</label>
+                  <input type="date" id="order-expected-date" required>
+                </div>
+              </div>
+
+              <div class="form-group">
+                <label class="checkbox-container">
+                  <input type="checkbox" id="order-urgent">
+                  <span class="checkmark"></span>
+                  <span class="checkbox-label">Marcar como recepción urgente / prioritaria</span>
+                </label>
+              </div>
+
+              <button type="submit" class="btn btn-primary btn-block">
+                <span>Guardar Pedido para Recepción</span>
+              </button>
+            </form>
+          </div>
+
+          <!-- Right Column: Excel / CSV Importer -->
+          <div class="card import-card">
+            <div class="card-header">
+              <h2>Importar desde Excel o CSV</h2>
+              <p class="card-desc">Arrastra tu listado de compras o pedidos para cargarlos todos en bloque en 1 segundo.</p>
+            </div>
+
+            <div class="drop-zone" id="excel-drop-zone">
+              <div class="drop-icon">📊</div>
+              <p class="drop-main-text">Arrastra aquí tu archivo <strong>.xlsx, .xls o .csv</strong></p>
+              <p class="drop-sub-text">O haz clic para seleccionarlo de tu ordenador o tablet</p>
+              <input type="file" id="excel-file-input" accept=".csv, .xlsx, .xls, .txt" class="file-input-hidden">
+            </div>
+
+            <div class="sample-excel-box">
+              <div class="sample-header">
+                <span class="sample-title">Columnas admitidas en Excel / CSV:</span>
+                <button type="button" id="btn-load-sample-data" class="btn-link">Cargar 4 pedidos de prueba</button>
+              </div>
+              <div class="code-preview">
+<code>Nº Pedido | Proveedor | Materiales | Cantidad | Fecha</code>
+              </div>
+            </div>
+
+            <div id="import-feedback" class="import-feedback" style="display: none;"></div>
+
+            <!-- Procore Direct Sync Box -->
+            <div class="procore-direct-sync-box">
+              <div class="procore-sync-header">
+                <div style="display: flex; align-items: center; gap: 0.5rem;">
+                  <span class="procore-icon-mini">P</span>
+                  <strong>Sincronización Directa con Procore</strong>
+                </div>
+                <span class="procore-status-badge" id="procore-mode-badge">Modo Simulación</span>
+              </div>
+              <p class="procore-sync-desc">Descarga automáticamente las Órdenes de Compra (Purchase Orders) registradas en tu proyecto de Procore.</p>
+              <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                <button type="button" id="btn-sync-procore-pos" class="btn btn-primary" style="flex: 1;">
+                  <span class="btn-icon">📥</span>
+                  <span>Traer Pedidos de Procore</span>
+                </button>
+                <button type="button" id="btn-open-procore-settings-tab" class="btn btn-secondary">
+                  <span class="btn-icon">⚙️</span>
+                  <span>Configurar API</span>
+                </button>
+              </div>
+              <div id="procore-po-sync-feedback" class="import-feedback" style="display: none; margin-top: 0.75rem;"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 3: HISTORIAL Y FIRMAS -->
+      <section id="tab-historial" class="tab-panel">
+        <div class="panel-toolbar">
+          <div class="search-box">
+            <span class="search-icon">🔍</span>
+            <input type="text" id="input-search-history" placeholder="Buscar en historial por albarán, proveedor, material...">
+          </div>
+          <div class="toolbar-actions">
+            <button id="btn-export-csv" class="btn btn-secondary">
+              <span class="btn-icon">📥</span>
+              <span>Descargar Reporte (CSV)</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="table-responsive">
+          <table class="data-table" id="table-history">
+            <thead>
+              <tr>
+                <th>Estado</th>
+                <th>Fecha/Hora</th>
+                <th>Nº Pedido / Ref</th>
+                <th>Proveedor</th>
+                <th>Materiales y Cantidad</th>
+                <th>Receptor</th>
+                <th>Firma</th>
+                <th>Albarán / Foto</th>
+                <th>Procore Log</th>
+              </tr>
+            </thead>
+            <tbody id="history-tbody">
+              <!-- Dynamically populated -->
+            </tbody>
+          </table>
+        </div>
+        <div id="empty-history-state" class="empty-state" style="display: none;">
+          <p>No se han registrado entregas todavía.</p>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- MODAL: RECEPCIÓN DE PEDIDO PENDIENTE -->
+  <div id="modal-reception" class="modal-backdrop" style="display: none;">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <div>
+          <span class="modal-tag" id="modal-order-tag">PED-001</span>
+          <h2 class="modal-title" id="modal-order-supplier">Recepción de Material</h2>
+        </div>
+        <button id="btn-close-modal" class="btn-close" aria-label="Cerrar">✕</button>
+      </div>
+
+      <div class="modal-body">
+        <!-- Order quick details summary -->
+        <div class="order-summary-box">
+          <div class="summary-line">
+            <span class="label">Material esperado:</span>
+            <span class="value" id="modal-order-material">20 sacos de cemento</span>
+          </div>
+          <div class="summary-line">
+            <span class="label">Cantidad prevista:</span>
+            <span class="value highlight" id="modal-order-quantity">20 ud</span>
+          </div>
+        </div>
+
+        <!-- 3 Big Action Buttons -->
+        <div class="reception-status-selector">
+          <label class="section-label">1. ¿Cómo ha llegado el pedido?</label>
+          <div class="status-options">
+            <button type="button" class="status-btn active" data-status="completo">
+              <span class="status-btn-icon">✅</span>
+              <span class="status-btn-text">Ha llegado TODO</span>
+              <span class="status-btn-sub">Completo y conforme</span>
+            </button>
+            <button type="button" class="status-btn" data-status="parcial">
+              <span class="status-btn-icon">⚠️</span>
+              <span class="status-btn-text">Llegada PARCIAL</span>
+              <span class="status-btn-sub">Faltan unidades o bultos</span>
+            </button>
+            <button type="button" class="status-btn" data-status="rechazado">
+              <span class="status-btn-icon">❌</span>
+              <span class="status-btn-text">Rechazado / No llegó</span>
+              <span class="status-btn-sub">Material dañado o erróneo</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Conditional details for Partial / Rejected -->
+        <div id="partial-details-container" class="form-group" style="display: none;">
+          <label for="input-partial-notes" id="label-partial-notes">Indica qué ha llegado o motivo:</label>
+          <input type="text" id="input-partial-notes" placeholder="Ej: Han llegado solo 10 sacos, los otros 10 vienen mañana">
+        </div>
+
+        <!-- Delivery Note / Albarán number and photo -->
+        <div class="form-row">
+          <div class="form-group flex-1">
+            <label for="input-albaran">Nº Albarán / Remisión del transportista (opcional)</label>
+            <input type="text" id="input-albaran" placeholder="Ej: ALB-88412">
+          </div>
+          <div class="form-group flex-1">
+            <label for="input-photo">Foto del albarán o material</label>
+            <div class="photo-uploader">
+              <input type="file" id="input-photo" accept="image/*" capture="environment">
+              <div id="photo-preview-box" class="photo-preview" style="display: none;">
+                <img id="photo-preview-img" src="" alt="Previsualización de foto">
+                <button type="button" id="btn-remove-photo" class="btn-remove-mini" title="Eliminar foto">✕</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Digital Signature Canvas Section -->
+        <div class="signature-section">
+          <div class="signature-header">
+            <label class="section-label">2. Firma de recepción (con dedo o ratón)</label>
+            <button type="button" id="btn-clear-signature" class="btn-link">Borrar firma</button>
+          </div>
+          <div class="signature-canvas-wrapper">
+            <canvas id="signature-canvas" width="600" height="180"></canvas>
+            <div class="signature-hint" id="signature-hint">Firma aquí sobre la línea con el dedo o ratón</div>
+          </div>
+          <div class="signee-name-row">
+            <input type="text" id="input-signee-name" placeholder="Nombre de quien recibe (Ej: Juan Pérez - Encargado)">
+          </div>
+        </div>
+
+      </div>
+
+      <div class="modal-footer">
+        <button type="button" id="btn-cancel-reception" class="btn btn-ghost">Cancelar</button>
+        <button type="button" id="btn-confirm-reception" class="btn btn-primary btn-large">
+          <span class="btn-icon">💾</span>
+          <span>Confirmar y Enviar a Procore</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: LLEGADA SIN PEDIDO PREVIO (ENTREGA IMPREVISTA) -->
+  <div id="modal-imprevista" class="modal-backdrop" style="display: none;">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <div>
+          <span class="modal-tag">ENTREGA IMPREVISTA</span>
+          <h2 class="modal-title">Llegada sin Pedido Previo</h2>
+        </div>
+        <button id="btn-close-imprevista" class="btn-close" aria-label="Cerrar">✕</button>
+      </div>
+
+      <div class="modal-body">
+        <p class="modal-notice">Registra la llegada de material que no estaba en el Excel o que llega con albarán en mano.</p>
+
+        <div class="form-row">
+          <div class="form-group flex-1">
+            <label for="imp-supplier">Proveedor / Transportista *</label>
+            <input type="text" id="imp-supplier" placeholder="Ej: Transportes García / Holcim" required>
+          </div>
+          <div class="form-group flex-1">
+            <label for="imp-albaran">Nº Albarán / Remisión *</label>
+            <input type="text" id="imp-albaran" placeholder="Ej: ALB-99021" required>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="imp-material">Materiales Entregados *</label>
+          <textarea id="imp-material" rows="2" placeholder="Ej: 3 palets de yeso, 10 sacos de cola..." required></textarea>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group flex-1">
+            <label for="imp-quantity">Cantidad *</label>
+            <input type="text" id="imp-quantity" placeholder="Ej: 3 palets / 50 ud" required>
+          </div>
+          <div class="form-group flex-1">
+            <label for="imp-photo">Foto del Albarán en papel</label>
+            <div class="photo-uploader">
+              <input type="file" id="imp-photo" accept="image/*" capture="environment">
+              <div id="imp-photo-preview-box" class="photo-preview" style="display: none;">
+                <img id="imp-photo-preview-img" src="" alt="Albarán">
+                <button type="button" id="btn-remove-imp-photo" class="btn-remove-mini">✕</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Digital Signature Canvas Section -->
+        <div class="signature-section">
+          <div class="signature-header">
+            <label class="section-label">Firma de recepción</label>
+            <button type="button" id="btn-clear-imp-signature" class="btn-link">Borrar firma</button>
+          </div>
+          <div class="signature-canvas-wrapper">
+            <canvas id="imp-signature-canvas" width="600" height="180"></canvas>
+            <div class="signature-hint" id="imp-signature-hint">Firma aquí sobre la línea con el dedo o ratón</div>
+          </div>
+          <div class="signee-name-row">
+            <input type="text" id="imp-signee-name" placeholder="Nombre de quien recibe (Ej: Juan Pérez - Encargado)">
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button type="button" id="btn-cancel-imprevista" class="btn btn-ghost">Cancelar</button>
+        <button type="button" id="btn-confirm-imprevista" class="btn btn-primary btn-large">
+          <span class="btn-icon">⚡</span>
+          <span>Registrar y Sincronizar en Procore</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: LIGHTBOX / ZOOM DE IMAGEN -->
+  <div id="modal-lightbox" class="modal-backdrop" style="display: none;">
+    <div class="modal-dialog lightbox-dialog">
+      <div class="modal-header">
+        <h3 class="modal-title" id="lightbox-title">Documento / Firma</h3>
+        <button id="btn-close-lightbox" class="btn-close">✕</button>
+      </div>
+      <div class="modal-body lightbox-body">
+        <img id="lightbox-img" src="" alt="Vista ampliada">
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: CENTRO DE INTEGRACIÓN Y CONEXIÓN PROCORE API -->
+  <div id="modal-procore-sync" class="modal-backdrop" style="display: none;">
+    <div class="modal-dialog procore-config-dialog">
+      <div class="modal-header">
+        <div class="header-brand">
+          <div class="brand-badge" style="width:34px; height:34px; font-size:1.1rem;">P</div>
+          <div>
+            <h2 class="modal-title">Centro de Integración Procore API</h2>
+            <p style="font-size: 0.78rem; color: var(--text-muted); margin: 0;">Sincronización de Entregas y Órdenes de Compra</p>
+          </div>
+        </div>
+        <button id="btn-close-procore-modal" class="btn-close" aria-label="Cerrar">✕</button>
+      </div>
+
+      <!-- Subtabs inside Procore modal -->
+      <div class="procore-modal-tabs">
+        <button type="button" class="procore-subtab active" data-subtab="subtab-credenciales">🔑 Conexión y Credenciales</button>
+        <button type="button" class="procore-subtab" data-subtab="subtab-pedidos">📥 Pedidos (Purchase Orders)</button>
+        <button type="button" class="procore-subtab" data-subtab="subtab-payload">☁️ Bitácora Diaria (Payload)</button>
+      </div>
+
+      <div class="modal-body">
+        
+        <!-- SUBTAB 1: SECRETS Y ESTADO DE INSTANCIA -->
+        <div id="subtab-credenciales" class="procore-subpanel active">
+          
+          <div class="modal-notice" style="margin-bottom: 1rem; border-left-color: #10b981;">
+            🛡️ <strong>Seguridad de Instancia:</strong> Las credenciales y tokens de Procore están asegurados en el backend mediante <strong>Secrets / Variables de Entorno (archivo <code>.env</code>)</strong>. Ningún operario en obra tiene acceso a los tokens desde su navegador.
+          </div>
+
+          <!-- Instance Status Cards -->
+          <div class="instance-details-grid">
+            <div class="instance-item">
+              <span class="instance-label">Estado del Token Secret:</span>
+              <span class="instance-val" id="instance-token-status">
+                <span class="status-dot online"></span> Cargado en servidor
+              </span>
+            </div>
+            <div class="instance-item">
+              <span class="instance-label">Entorno Procore:</span>
+              <span class="instance-val" id="instance-env-val">Sandbox (https://sandbox.procore.com)</span>
+            </div>
+            <div class="instance-item">
+              <span class="instance-label">Company ID:</span>
+              <span class="instance-val" id="instance-company-val">104928</span>
+            </div>
+            <div class="instance-item">
+              <span class="instance-label">Proyecto en Obra:</span>
+              <span class="instance-val" id="instance-project-val">Torre Skyline - Fase 2 (ID: 29814)</span>
+            </div>
+          </div>
+
+          <!-- Secret File Hint -->
+          <div class="secret-box-info">
+            <div style="font-weight: 700; margin-bottom: 0.25rem;">📄 Archivo de Configuración de Servidor:</div>
+            <code>warehouseReceiptsProcore/.env</code>
+            <p style="font-size: 0.78rem; color: var(--text-muted); margin-top: 0.35rem;">
+              Para cambiar el token o el proyecto de esta instancia, edita las variables <code>PROCORE_ACCESS_TOKEN</code> o <code>PROCORE_PROJECT_ID</code> en tu entorno o archivo <code>.env</code>.
+            </p>
+          </div>
+
+          <!-- Test Connection Action & Diagnostics -->
+          <div class="procore-actions-bar">
+            <button type="button" id="btn-test-procore-conn" class="btn btn-primary" style="flex: 1;">
+              <span class="btn-icon">⚡</span>
+              <span>Comprobar Conexión Servidor ↔ Procore API</span>
+            </button>
+          </div>
+
+          <div id="procore-test-result" class="procore-test-box" style="display: none;"></div>
+
+        </div>
+
+        <!-- SUBTAB 2: ÓRDENES DE COMPRA (PURCHASE ORDERS) -->
+        <div id="subtab-pedidos" class="procore-subpanel">
+          <p style="font-size:0.9rem; color:var(--text-muted); line-height:1.5;">
+            Procore gestiona los pedidos a través de su API de Compromisos (<strong>Purchase Order Contracts</strong>). Al hacer clic abajo, se consultan las órdenes vigentes para volcarlas a tu bandeja de recepción:
+          </p>
+          <div class="endpoint-badge">
+            <span class="method">GET</span>
+            <code>/rest/v1.0/projects/{project_id}/purchase_order_contracts</code>
+          </div>
+
+          <div style="margin: 1.25rem 0; text-align: center;">
+            <button type="button" id="btn-modal-sync-pos" class="btn btn-primary btn-large">
+              <span class="btn-icon">📥</span>
+              <span>Importar Órdenes de Compra a Recepción</span>
+            </button>
+          </div>
+
+          <div id="modal-po-sync-feedback" class="import-feedback" style="display: none;"></div>
+        </div>
+
+        <!-- SUBTAB 3: PAYLOAD Y BITÁCORA DIARIA -->
+        <div id="subtab-payload" class="procore-subpanel">
+          <p style="font-size:0.9rem; color:var(--text-muted); line-height:1.5;">
+            Cada recepción confirmada o imprevista registrada en obra genera una entrega en la Bitácora Diaria de Procore:
+          </p>
+          <div class="endpoint-badge">
+            <span class="method">POST</span>
+            <code>/rest/v1.0/projects/{project_id}/daily_logs/deliveries</code>
+          </div>
+          <label class="section-label" style="margin-top:0.5rem;">Último payload JSON emitido:</label>
+          <pre id="procore-payload-code" class="code-preview" style="max-height:220px;"></pre>
+        </div>
+
+      </div>
+
+      <div class="modal-footer">
+        <button type="button" id="btn-close-procore-modal-2" class="btn btn-ghost">Cerrar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- TOAST NOTIFICATIONS CONTAINER -->
+  <div id="toast-container" class="toast-container"></div>
+
+  <!-- Core Application Logic -->
+  <script src="app.js"></script>
+
+  <!-- Service Worker Registration for Offline Field Support -->
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('./sw.js').catch(err => {
+          console.log('SW registration info:', err);
+        });
+      });
+    }
+  </script>
+</body>
+</html>

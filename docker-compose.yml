@@ -1,0 +1,28 @@
+# ==============================================================
+# PROCORE MATERIALS HUB - DOCKER COMPOSE CONFIGURATION
+# Despliegue en 1 solo comando: docker compose up -d
+# ==============================================================
+
+version: '3.8'
+
+services:
+  procore-hub:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: procore-materials-hub
+    restart: unless-stopped
+    ports:
+      - "${PORT:-4173}:${PORT:-4173}"
+    env_file:
+      - .env
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:4173/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
